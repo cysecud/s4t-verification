@@ -1,0 +1,596 @@
+(*--------------------------------------------------------------------------------------------------------*)
+(*definizione dei tipi*)
+type key.
+type uuid. 
+type LRid.
+type port. 
+(*--------------------------------------------------------------------------------------------------------*)
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*canali pubblici, per simulare il tunnel creato dal wstun*)
+free tunnelUsersSide:channel. 
+free tunnelLRsSide:channel.
+
+(*canale usato per le comunicazioni fra gli attor (con cifratura simmetrica per simulare TLS *)
+free channelTLS:channel.
+(*--------------------------------------------------------------------------------------------------------*)
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*gli user_id degli utenti si danno per noti*) 
+free user_id:uuid. 
+(*--------------------------------------------------------------------------------------------------------*)
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*funzioni per le conversioni di tipo*)
+fun port_to_bitstring(port):bitstring [typeConverter].
+
+(*symmetric encryption*) 
+fun senc(bitstring, key):bitstring.
+reduc forall m:bitstring, k:key; sdec(senc(m,k),k) = m.
+
+letfun service_result(boardID:LRid, uID:uuid, keyServiceEncryption:key) = 
+    new result:bitstring; 
+    senc((boardID, uID, result), keyServiceEncryption). 
+
+letfun service_payload(encryptedPayload:bitstring, keyServiceEncryption:key) = 
+    sdec (encryptedPayload, keyServiceEncryption).
+(*--------------------------------------------------------------------------------------------------------*)
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*database di keystone per l'autenticazione dell'utente*) 
+table credentials(bitstring, bitstring, bitstring). 
+
+(*database per i tunnel creati; wstun fa gli inserimenti, gli agenti lo consultano per fare da router*)
+table tunnels(port, port, LRid).
+
+(*database per gli agenti del tunnel*)
+table agents(bitstring, bitstring). 
+(*--------------------------------------------------------------------------------------------------------*)
+
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*EVENTI*)
+
+(*eventi di inzio e fine protocollo*)
+event startOfProtocol (bitstring). 
+event endOfProtocol (bitstring). 
+
+(*eventi per la richiesta, generazione ed utilizzo del token*)
+event userRequestForToken (uuid,bitstring). 
+event keystoneCreateToken (uuid,bitstring). 
+event keystoneResponseToken (uuid,bitstring).
+event userGetToken (uuid,bitstring). 
+event uiAcceptToken (uuid,bitstring).
+
+(*eventi per la richiesta di creazione del tunnel*)
+event userRequestForTunnel (LRid, port, bitstring). 
+event uiForwardRequest (LRid, port, bitstring). 
+event conductorForwardRequest (LRid, port, bitstring). 
+event wagentForwardRequest (LRid, port, bitstring).
+event LRreceiveRequest (LRid, port, bitstring).
+event LRsendOK (LRid, port, bitstring).
+event wstunCreateTunnel(LRid, port, bitstring). 
+
+(*eventi per la risposta di creazione del tunnel*) 
+event wstunResponseForTunnel (LRid, port, bitstring, bitstring).
+event LRreceiveResponse (LRid, bitstring, bitstring, bitstring).
+event LRforwardResponse (LRid, bitstring, bitstring, bitstring).
+event wagentForwardResponse (LRid, bitstring, bitstring, bitstring).
+event conductorForwardResponse (LRid, bitstring, bitstring, bitstring). 
+event uiForwardResponse (LRid, bitstring, bitstring, bitstring). 
+event userGetTunnelPort (LRid, port, bitstring, bitstring). 
+
+(*eventi per la richiesta del servizio*) 
+event userRequestForService(uuid, LRid, bitstring).
+event WSTUNagentUserToLRForwardRequest (LRid).
+event lightningrodReceiveRequest (uuid, LRid, bitstring). 
+
+(*eventi per la risposta del servizio*) 
+event lightningrodGenerateResult (uuid, LRid, bitstring). 
+event lightningrodSendResponseForService (uuid,LRid, bitstring). 
+event WSTUNagentLRToUserForwardResponse (LRid). 
+event userReceiveResponseForService (uuid, LRid, bitstring). 
+event userGetResult (uuid, LRid, bitstring). 
+(*--------------------------------------------------------------------------------------------------------*)
+
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*QUERY DI SEGRETEZZA*)
+(*l'attaccante non conosce la chiave con cui è cifrato il token, condivisa fra keystone e ui*)
+query attacker (new ks).
+query attacker (new tunnelPort).
+query attacker (new servicePort). 
+query attacker (new result).
+query attacker (new payload).
+(*--------------------------------------------------------------------------------------------------------*)
+
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*QUERY SUL PROTOCOLLO COMPLETO*)
+(*il protocollo termina*)
+
+query username:bitstring; inj-event (endOfProtocol(username)).
+
+(*inizio e fine del protocollo*)
+query username:bitstring; inj-event (endOfProtocol(username)) ==> inj-event (startOfProtocol(username)). 
+
+(*il token viene creato*)
+query uID:uuid, nonce:bitstring;
+    event (keystoneCreateToken(uID, nonce)).
+
+(*il tunnel viene creato*)
+query boardID:LRid, servicePort:port, nonce:bitstring;
+    event (wstunCreateTunnel(boardID, servicePort, nonce)).
+
+(*la richiesta arriva correttamente alla board*)
+query uID:uuid, boardID:LRid, payload:bitstring; 
+    inj-event (lightningrodReceiveRequest(uID, boardID, payload)).
+
+(*l'utente riceve il risultato*)
+query uID:uuid, boardID:LRid, result:bitstring; 
+    inj-event (userGetResult(uID, boardID, result)).
+(*--------------------------------------------------------------------------------------------------------*)
+
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*QUERY SUL TOKEN*)
+(*processo di richiesta, generazione ed utilizzo del token*)
+query uID:uuid, nonce1:bitstring, nonce2:bitstring; 
+    inj-event (uiAcceptToken(uID, nonce2))
+    ==> (inj-event (userGetToken(uID, nonce2))
+    ==> (inj-event (keystoneResponseToken(uID, nonce1)) 
+    ==> (inj-event (keystoneCreateToken(uID, nonce1))
+    ==> inj-event (userRequestForToken(uID, nonce1))))). 
+(*--------------------------------------------------------------------------------------------------------*)
+
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*QUERY SUL TUNNEL*)
+(*richiesta di creazione del tunnel da parte dell'utente
+  deve fare: user -> ui -> conductor -> wagent -> LR -> WSTUN -> tunnel creato*)
+query boardID:LRid, servicePort:port, nonce:bitstring;
+    inj-event (wstunCreateTunnel(boardID, servicePort, nonce))
+    ==> (inj-event (LRsendOK(boardID, servicePort, nonce))
+    ==> (inj-event (LRreceiveRequest(boardID, servicePort, nonce))
+    ==> (inj-event (wagentForwardRequest(boardID, servicePort, nonce))
+    ==> (inj-event (conductorForwardRequest(boardID, servicePort, nonce)) 
+    ==> (inj-event (uiForwardRequest(boardID, servicePort, nonce))
+    ==> inj-event (userRequestForTunnel(boardID, servicePort, nonce))))))). 
+
+(*risposta di creazione del tunnel 
+  deve fare wstun -> conductor -> ui -> user *)
+query boardID:LRid, tunnelPort:port, agentIDUserSide:bitstring, nonce:bitstring;
+    inj-event (userGetTunnelPort(boardID, tunnelPort, agentIDUserSide, nonce))
+    ==> (inj-event (uiForwardResponse(boardID, port_to_bitstring(tunnelPort), agentIDUserSide, nonce)) 
+    ==> (inj-event (conductorForwardResponse(boardID,port_to_bitstring(tunnelPort), agentIDUserSide, nonce))
+    ==> (inj-event (wagentForwardResponse(boardID,port_to_bitstring(tunnelPort), agentIDUserSide, nonce))
+    ==> (inj-event (LRforwardResponse(boardID,port_to_bitstring(tunnelPort), agentIDUserSide, nonce))
+    ==> (inj-event (LRreceiveResponse(boardID,port_to_bitstring(tunnelPort), agentIDUserSide, nonce))
+    ==> inj-event (wstunResponseForTunnel(boardID, tunnelPort, agentIDUserSide, nonce))))))). 
+(*--------------------------------------------------------------------------------------------------------*)
+
+
+(*--------------------------------------------------------------------------------------------------------*)
+(*QUERY SUL SERVIZIO*)
+(*percorso della richiesta: user -> agent -> LR*)
+query uID:uuid, boardID:LRid, payload:bitstring; 
+    inj-event (lightningrodReceiveRequest(uID, boardID, payload))
+    ==> (inj-event (WSTUNagentUserToLRForwardRequest(boardID))
+    ==> inj-event (userRequestForService(uID, boardID, payload))).
+
+(*percorso della risposta LR -> agent -> user*)
+query uID:uuid, boardID:LRid, result:bitstring; 
+    event (userGetResult(uID, boardID, result))
+    ==> (inj-event (userReceiveResponseForService(uID, boardID, result))
+    ==> (inj-event (WSTUNagentLRToUserForwardResponse(boardID)) 
+    ==> (inj-event (lightningrodSendResponseForService(uID, boardID, result))
+    ==> inj-event (lightningrodGenerateResult(uID, boardID, result))))).
+(*--------------------------------------------------------------------------------------------------------*)
+
+(*DEFINIZIONE DEL PROTOCOLLO*)
+
+let user (username:bitstring, uID:uuid, password:bitstring, scope:bitstring, 
+boardID:LRid, servicePort:port, sk1:key, sk2:key, keyTunnelUserSide:key) =
+    
+    event startOfProtocol(username);
+    
+(*La prima cosa che deve fare l'utente è autenticarsi. Per fare ciò deve richiedere al keystone un 
+token, che verrà poi usato per mandare alla ui la richiesta di associazione di una porta per il servizio*)
+        
+    (*invio della richiesta di autenticazione sul canale, la riceverà keystone*)
+    (*la richiesta "getToken" viene cifrata con la chiave sk1*)
+    new nonceForToken:bitstring; 
+    let getTokenRequest = (username, uID, password, scope, nonceForToken) in 
+
+    event userRequestForToken (uID,nonceForToken);
+
+    out (channelTLS, senc(getTokenRequest,sk1));
+    
+
+    (*riceve sul canale privato il token e lo inoltra alla ui assieme alla richiesta "serviceEnable"*)
+    in (channelTLS, encryptedToken:bitstring); 
+    let (token:bitstring, =nonceForToken) = sdec(encryptedToken, sk1) in 
+    
+    
+    (*Ricevuto il token, l'utente crea la richiesta per il servizio che è associato alla porta "servicePort"*)
+    (*il nome del servizio "serviceName" è un nome generico creato dall'utente, per questo viene definito con new*)
+    (*ad identificare il servizio univocamente, invece, è la porta*)
+    new serviceName:bitstring;
+    (*per comodità, i parametri dell'utente vengono convogliati in "userInfo"*)
+    let userInfo = (username, uID, scope) in
+
+    (*creazione della richiesta: l'utente chiede alla ui di rendere disponibile il servizio "serviceName",
+    che è in esecuzione sulla porta "service port, della board "boardID
+    Questo è necessario in quanto, tale board è dietro ad un firewall rigido, ed è quindi necessario creare 
+    un tunnel che permetta a tale servizio di essere visibile all'esterno. La creazione del tunnel è la mansione 
+    del iotronic_wstun*)
+    (*la richiesta deve contenere anche il token, in modo tale che la ui sia in grado di verificare che la 
+    richiesta arrivi da un utente autenticato*)
+    (*la richiesta è stata chiamata serviceEnable, in quanto cercando nel codice è stata trovata una funzione 
+    con tale nome, che si presuppone corrisponda a questa richiesta. In ogni caso, se il nome non fosse abbastanza 
+    esplicativo, si può pensare di cambiarlo in futuro*)
+    new nonceForTunnel:bitstring;
+    event userGetToken(uID,nonceForTunnel);
+    let serviceEnableRequest = (userInfo, serviceName, servicePort, boardID, token, nonceForTunnel) in
+
+    (*la richiesta viene mandata alla ui, cifrata con chiave sk2*)
+    event userRequestForTunnel(boardID, servicePort, nonceForTunnel); 
+    out(channelTLS, senc(serviceEnableRequest, sk2));
+    
+    (*riceve la risposta di conferma della creazione del tunnel dalla ui*)
+    in (channelTLS, encryptedTunnelPort:bitstring); 
+    
+    (*decifra con sk2*)
+    let ((port_to_bitstring(tunnelPort)), agentIDUserSide:bitstring, =nonceForTunnel) = sdec(encryptedTunnelPort, sk2) in
+    
+    event userGetTunnelPort(boardID, tunnelPort, agentIDUserSide, nonceForTunnel);
+
+(*A questo punto, il tunnel per il servizio è stato creato e l'utente conosce la tunnelPort sulla quale mandare
+le richieste in quanto la ha ricevuta tramite il canale protetto da TLS*)
+(*Perciò, ora l'utente può interagire con il servizio sulla board*)
+
+    (*generiamo una richiesta di collegamento al servizio*)
+    new payload:bitstring; 
+    let message = (uID, boardID, payload) in
+    (*la richiesta contiene: boardID, tunnelPort e un payload*)
+    let request = (boardID, tunnelPort, senc(message,keyTunnelUserSide)) in 
+
+    (*la richiesta viene mandata sul canale pubblico che simula il tunnel dal lato dell'utente*)
+
+    event userRequestForService (uID, boardID, payload); 
+    out(tunnelUsersSide, request); 
+    
+    (*l'utente riceve la risposta dalla board*)
+    in(tunnelUsersSide, response:bitstring); 
+    let (=boardID, =tunnelPort, data:bitstring) = response in
+    let (=agentIDUserSide, serviceResult:bitstring) = sdec(data, keyTunnelUserSide) in 
+    let (=boardID, =uID, result:bitstring) = serviceResult in 
+    
+    event userReceiveResponseForService(uID, boardID, result); 
+    event userGetResult(uID, boardID, result);
+    event endOfProtocol(username);
+
+    0.
+
+
+let keystone(ks:key, sk1:key) =
+    
+    (*riceve la richiesta di autenticazione dall'utente, che è cifrata con sk1*)
+    in (channelTLS, encryptedGetTokenRequest:bitstring);
+    
+    (*decifra la richiesta e la scompone nei suoi parametri*)
+    let getToken = sdec(encryptedGetTokenRequest, sk1) in 
+    let (username:bitstring, uID:uuid, password:bitstring, scope:bitstring, nonce:bitstring) = getToken in 
+    
+(*Una volta ricevuta la richiesta dall'utente, keystone deve verificare che sia un utente valido,
+controllando nel database credentials se username, password e scope sono validi
+Se l'autenticazione ha esito positivo, keystone crea il token, lo cifra con una chiave ks, nota solo a
+keystone e ui, e lo manda all'utente, ovviamente cifrandolo anche con sk1 per TLS*)
+
+    (*controllo nel database credentials*) 
+    get credentials (=username, =password, =scope) in
+
+    (*se passa il controllo l'user è autenticato e riceve indietro il token*)
+        let token = senc((uID, scope), ks) in 
+        (*evento token creato*)
+        event keystoneCreateToken(uID,nonce);
+
+    (*manda il token cifrato all'utente*)
+        event keystoneResponseToken(uID,nonce);
+        out(channelTLS, senc((token, nonce) ,sk1));
+        
+        0
+
+    (*altrimenti termina*)
+    else 
+        0.
+
+
+let iotronic_ui(ks:key, sk2:key, sk3:key) =  
+ 
+    (*riceve la richiesta serviceEnable dall'utente*)
+    in (channelTLS, encryptedServiceEnableRequest:bitstring); 
+
+    (*decifra la richiesta con sk2 e la scompone*)
+    let serviceEnableRequest = sdec(encryptedServiceEnableRequest,sk2) in
+    let (userInfo:bitstring, serviceName:bitstring, servicePort:port,boardID:LRid, encryptedToken:bitstring, nonce:bitstring) = serviceEnableRequest in
+    let (username:bitstring, uID:uuid, scope:bitstring) = userInfo in
+
+    (*decifra il token con la chiave ks*)
+    let token = sdec(encryptedToken, ks) in 
+
+    (*verifica la validità del token, confrontando i parametri contenuti in esso con quelli della richiesta*)
+    let (=uID, =scope) = token in
+    event uiAcceptToken(uID,nonce);
+
+(*Se il token è valido, la ui comunica con il conductor e chiede che venga associata una porta al servizio
+Questa richiesta si concretizzerà poi, nella creazione del tunnel*)
+
+    (*se il token è valido, richiede una porta da associare al servizio*)
+    let portForServiceRequest = (uID, serviceName, servicePort, boardID, nonce) in 
+    
+    (*manda la richiesta al conductor, cifrandola con sk3*)
+    event uiForwardRequest(boardID, servicePort, nonce);
+    out (channelTLS, senc(portForServiceRequest, sk3)); 
+    
+    
+    (*riceve la risposta di creazione del tunnel e la inoltra all'user*)
+    in (channelTLS, encryptedTunnelPort:bitstring);
+
+    (*decifra con sk3*)
+    let (tunnelPort:bitstring, agentID:bitstring, =nonce) = sdec(encryptedTunnelPort, sk3) in 
+
+    (*cifra con sk2 e manda all'utente*)
+    event uiForwardResponse(boardID, tunnelPort, agentID, nonce);
+
+    out (channelTLS, senc((tunnelPort, agentID, nonce), sk2));
+
+    0.
+
+
+let iotronic_conductor(sk3:key, sk4:key) = 
+    
+    (*riceve la richiesta per la porta da assosciare al servizio dalla ui*)
+    in (channelTLS, encryptedPortForServiceRequest:bitstring); 
+
+    (*la decifra con sk3*)
+    let portForServiceRequest = sdec(encryptedPortForServiceRequest, sk3) in
+
+    (*la scompone nelle sue componenti*)
+    let (uID:uuid, serviceName:bitstring, servicePort:port, boardID:LRid, nonce:bitstring) = portForServiceRequest in
+
+(*A questo punto il condcutor chiede al wstun di creare un tunnel verso la board per esporre 
+la servicePort sulla board*)
+(*La richiesta contiene le informazioni necessarie a wstun per creare il tunnel, quindi la servicePort 
+del servizio che si vuole esporre, il boardID della board sulla quale gira il servizio e il serviceName, che in realtà 
+si potrebbe anche omettere*)
+
+    (*manda la richiesta per la creazione del tunnel al wstun*)
+    let createWSTunnel = (serviceName, servicePort, boardID, nonce) in
+    (*la richiesta viene cifrata con sk4*)
+    event conductorForwardRequest(boardID, servicePort, nonce);
+    out (channelTLS, senc(createWSTunnel, sk4)); 
+    
+
+    (*riceve la risposta di creazione del tunnel e la inoltra alla ui*) 
+    in (channelTLS, encryptedTunnelPort:bitstring);
+
+    (*decifra con sk4*)
+    let (tunnelPort:bitstring, agentID:bitstring, =nonce) = sdec(encryptedTunnelPort, sk4) in  
+
+    (*manda alla ui cifrando con sk3*)
+    event conductorForwardResponse(boardID, tunnelPort, agentID, nonce);
+    out (channelTLS, senc((tunnelPort, agentID, nonce), sk3));
+    
+    0.
+
+(*MODIFICA: ora passa per wagent*)
+let iotronic_wagent(sk4:key, sk5:key) = 
+
+    (*riceve in input la richiesta di creazione del tunnel dal conductor*)
+    in (channelTLS, encryptedCreateWSTunnel:bitstring); 
+
+    (*decifra con sk4*)
+    let createWSTunnel = sdec(encryptedCreateWSTunnel, sk4) in
+
+    (*scompone la richiesta*)
+    let (serviceName:bitstring, servicePort:port, boardID:LRid, nonce:bitstring) = createWSTunnel in
+
+    event wagentForwardRequest(boardID, servicePort, nonce);
+
+    out (channelTLS, senc(createWSTunnel, sk5)); 
+
+    in (channelTLS, encryptedTunnelPort:bitstring);
+
+    (*decifra con sk5*)
+    let (tunnelPort:bitstring, agentID:bitstring, =nonce) = sdec(encryptedTunnelPort, sk5) in 
+
+    (*cifra con sk4 e manda all'utente*)
+    event wagentForwardResponse(boardID, tunnelPort, agentID, nonce);
+    out (channelTLS, senc((tunnelPort, agentID, nonce), sk4));
+
+    0.
+
+
+let iotronic_wstun(sk6:key) = 
+
+    in (channelTLS, encryptedTunnelCreationResponse:bitstring);
+
+    let tunnelCreationResponse = sdec(encryptedTunnelCreationResponse, sk6) in
+
+    (*scompone la richiesta*)
+    let (serviceName:bitstring, servicePort:port, boardID:LRid, nonce:bitstring) = tunnelCreationResponse in
+ 
+    (*manda indetro verso l'utente la porta pubblica*) 
+    get agents (agentIDBoardSide, agentIDUserSide) in 
+        (*genera una porta pubblica*)
+        new tunnelPort:port;
+
+        (*inserisce nel database tunnels -> tunnel per il servizio è creato*)
+        insert tunnels (tunnelPort, servicePort, boardID ); 
+        (*evento della creazione del tunnel*)
+        event wstunCreateTunnel(boardID, servicePort, nonce);
+
+        event wstunResponseForTunnel(boardID, tunnelPort, agentIDUserSide, nonce);
+        out (channelTLS, senc((port_to_bitstring(tunnelPort), agentIDUserSide, nonce), sk6)); 
+        0
+    else 0. 
+
+
+let WSTUN_agentUserToLR (agentIDUserSide:bitstring, keyTunnelUserSide:key) = 
+
+    (*riceve la richiesta di connessione al servizio dall'utente, fa da proxy e quindi sostituisce 
+    nella richiesta la tunnelPort con la servicePort e la inoltra alla board*)
+    in (tunnelUsersSide, requestFromUser:bitstring);
+
+    (*scompone la richiesta*)
+    let (boardID:LRid, tunnelPort:port, encryptedPayload:bitstring) = requestFromUser in
+    
+    let payload = sdec(encryptedPayload, keyTunnelUserSide) in 
+    
+    (*controlla se esiste un tunnel verso quella board*)
+    get tunnels (=tunnelPort, servicePort, =boardID) in
+
+        (*inoltra la richiesta alla board, sulla porta del servizio*)
+        let requestToBoard = (boardID, servicePort, agentIDUserSide, payload) in
+
+        event WSTUNagentUserToLRForwardRequest(boardID); 
+        out (tunnelLRsSide, (requestToBoard));
+        
+        0
+    else 
+        0.
+
+
+let WSTUN_agentLRToUser (agentIDBoardSide:bitstring, keyTunnelUserSide:key) = 
+
+    (*riceve la risposta di LR verso l'utente*)
+    (*fa da proxy e quindi sostituisce nella risposta la servicePort con la tunnelPort e la inoltra all'utente*)
+    in(tunnelLRsSide, responseFromLR:bitstring);
+    let (boardID:LRid, servicePort:port, =agentIDBoardSide, data:bitstring) = responseFromLR in
+    
+    get agents(=agentIDBoardSide,agentIDUserSide) in 
+        (*controlla il database*) 
+        get tunnels (tunnelPort, =servicePort, =boardID) in
+
+            (*inoltra la risposta all'utente*)
+            let responseToUser = (boardID, tunnelPort, senc((agentIDUserSide,data),keyTunnelUserSide)) in 
+            
+            event WSTUNagentLRToUserForwardResponse(boardID);
+            out (tunnelUsersSide, responseToUser); 
+            0
+
+        else 
+            0
+    else 
+        0. 
+
+
+let lightningrod (sk5:key, sk6:key, boardID:LRid, servicePort:port) = 
+
+    (*richiesta dal wagent*)
+    in (channelTLS, encryptedCreateWSTunnel:bitstring);
+
+    let createWSTunnel = sdec(encryptedCreateWSTunnel, sk5) in
+
+    (*scompone la richiesta*)
+    let (serviceName:bitstring, =servicePort, =boardID, nonce:bitstring) = createWSTunnel in
+    event LRreceiveRequest(boardID, servicePort, nonce);
+    let tunnelCreationResponse = (serviceName, servicePort, boardID, nonce) in
+
+    event LRsendOK(boardID, servicePort, nonce);
+    out (channelTLS, senc(tunnelCreationResponse, sk6)); 
+
+    (*riceve la risposta di creazione del tunnel e la inoltra alla ui*) 
+    in (channelTLS, encryptedTunnelPort:bitstring);
+
+    (*decifra con sk6*)
+    let (tunnelPort:bitstring, agentID:bitstring, =nonce) = sdec(encryptedTunnelPort, sk6) in  
+    event LRreceiveResponse(boardID, tunnelPort, agentID, nonce);
+
+    event LRforwardResponse(boardID, tunnelPort, agentID, nonce);
+    (*manda alla ui cifrando con sk5*)
+    out (channelTLS, senc((tunnelPort, agentID, nonce), sk5));
+
+    (*riceve la richiesta dall'agent_toLR*) 
+    in (tunnelLRsSide, requestFromUser:bitstring); 
+
+    (*scompone la richiesta e controlla che sia destinata a lui (alla board giusta, guarda boardID)*)
+    let (=boardID, =servicePort, agentIDUserSide:bitstring, data:bitstring) = requestFromUser in 
+
+    get agents (agentIDBoardSide, =agentIDUserSide) in 
+
+        (*SERVER*)
+        let (uID:uuid, =boardID, payload:bitstring) = data in 
+
+        event lightningrodReceiveRequest(uID, boardID, payload);
+
+        new result:bitstring;  
+
+        event lightningrodGenerateResult(uID, boardID, result);
+    
+        (*MANDA ALL'AGENT*)
+
+        let responseToUser = (boardID, servicePort, agentIDBoardSide, (boardID, uID, result)) in
+        
+        (*manda la risposta all'agent_toUser*)
+        event lightningrodSendResponseForService(uID, boardID, result);
+        out (tunnelLRsSide, (responseToUser));
+    
+        0
+    else 
+        0. 
+(*--------------------------------------------------------------------------------------------------------*)
+
+(*--------------------------------------------------------------------------------------------------------*)
+process  
+
+    (*chiave condivisa fra keystone e ui*)
+    new ks:key; 
+
+    (*chiavi per TLS*)
+    new sk1:key;
+    new sk2:key;
+    new sk3:key;
+    new sk4:key; 
+    new sk5:key; 
+    new sk6:key; 
+
+    new keyTunnelUserSide:key;
+    new keyServiceEncryption:key;
+    
+    (*in questo caso si presuppone che tutti gli utenti provino a comunicare allo stesso servizio 
+    sulla stessa board*)
+    new servicePort:port;
+    new boardID:LRid;
+
+    (*parametri dell'user*)
+    new username:bitstring;
+    new password:bitstring;
+    new scope:bitstring;
+
+    (*id degli agenti*)
+    new agentIDBoardSide:bitstring;
+    new agentIDUserSide:bitstring;  
+
+    (*inserisco credenziali nel database per l'autenticazione*) 
+    insert credentials (username, password, scope);
+    
+    insert agents (agentIDBoardSide,agentIDUserSide);
+
+    user(username, user_id, password, scope, boardID, servicePort,sk1,sk2,keyTunnelUserSide) |
+    keystone(ks,sk1) | 
+    iotronic_ui(ks, sk2, sk3) | 
+    iotronic_conductor(sk3, sk4) | 
+    iotronic_wagent(sk4,sk5) | 
+    iotronic_wstun(sk6) | 
+    WSTUN_agentUserToLR(agentIDUserSide, keyTunnelUserSide) | 
+    WSTUN_agentLRToUser(agentIDBoardSide, keyTunnelUserSide) | 
+    lightningrod(sk5, sk6, boardID, servicePort) 
+
+(*--------------------------------------------------------------------------------------------------------*)
+
+
+
+
+    

@@ -1,0 +1,138 @@
+{
+    "bigraphInfo": {
+      "id": "stack4things"
+    },
+    "types": ["key", "uuid", "LRid", "port"],
+    "variables": {
+      "public": ["user_id:uuid"],
+      "private": []
+    },
+    "functions": {
+      "senc": "fun senc(bitstring, key):bitstring. reduc forall m:bitstring, k:key; sdec(senc(m,k),k) = m.",
+      "port_to_bitstring": "fun port_to_bitstring(port):bitstring [typeConverter].",
+      "service_result": "letfun service_result(boardID:LRid, uID:uuid, keyServiceEncryption:key) = new result:bitstring; senc((boardID, uID, result), keyServiceEncryption).", 
+      "service_payload": "letfun service_payload(encryptedPayload:bitstring, keyServiceEncryption:key) = sdec (encryptedPayload, keyServiceEncryption).", 
+      "credentials": "table credentials(bitstring, bitstring, bitstring).",
+      "tunnels": "table tunnels(port, port, LRid).", 
+      "agents": "table agents(bitstring, bitstring)."
+    },
+    "queries": {
+      "keyKS": {
+        "attacker": "new ks"
+      }, 
+      "tunnelPort": {
+        "attacker": "new tunnelPort"
+      },
+      "servicePort": {
+        "attacker": "new servicePort"
+      }, 
+      "result": {
+        "attacker": "new result"
+      }, 
+      "payload": {
+        "attacker": "new payload"
+      }, 
+      "endOfProtocol": {
+        "query": "username:bitstring; inj-event (endOfProtocol(username))"
+      }, 
+      "endAndStart": {
+        "query": "username:bitstring; inj-event (endOfProtocol(username)) ==> inj-event (startOfProtocol(username))"
+      }, 
+      "tokenCreated": {
+        "query": "uID:uuid, nonce:bitstring; inj-event (keystoneCreateToken(uID, nonce))"
+      }, 
+      "tunnelCreated": {
+        "query": "boardID:LRid, servicePort:port, nonce:bitstring; inj-event (wstunCreateTunnel(boardID, servicePort, nonce))"
+      },  
+      "LRReceiveRequest": {
+        "query": "uID:uuid, boardID:LRid, keyServiceEncryption:key, payload:bitstring; inj-event (lightningrodReceiveRequest(uID, boardID, keyServiceEncryption, payload))"
+      }, 
+      "userGetResult": {
+        "query": "uID:uuid, boardID:LRid, keyServiceEncryption:key, result:bitstring; inj-event (userGetResult(uID, boardID, keyServiceEncryption, result))"
+      },      
+      "tokenProcess": {
+        "query": "uID:uuid, nonce1:bitstring, nonce2:bitstring; inj-event (uiAcceptToken(uID, nonce2)) ==> (inj-event (userGetToken(uID, nonce2)) ==> (inj-event (keystoneResponseToken(uID, nonce1)) ==> (inj-event (keystoneCreateToken(uID, nonce1)) ==> inj-event (userRequestForToken(uID, nonce1)))))"
+      },  
+      "tunnelProcess1": {
+        "query": "boardID:LRid, servicePort:port, nonce:bitstring; inj-event (wstunCreateTunnel(boardID, servicePort, nonce)) ==> (inj-event (LRsendOK(boardID, servicePort, nonce)) ==> (inj-event (LRreceiveRequest(boardID, servicePort, nonce)) ==> (inj-event (wagentForwardRequest(boardID, servicePort, nonce)) ==> (inj-event (conductorForwardRequest(boardID, servicePort, nonce)) ==> (inj-event (uiForwardRequest(boardID, servicePort, nonce)) ==> inj-event (userRequestForTunnel(boardID, servicePort, nonce)))))))"
+      },
+      "tunnelProcess2": {
+        "query": "boardID:LRid, tunnelPort:port, agentIDUserSide:bitstring, nonce:bitstring; inj-event (userGetTunnelPort(boardID, tunnelPort, agentIDUserSide, nonce)) ==> (inj-event (uiForwardResponse(boardID, port_to_bitstring(tunnelPort), agentIDUserSide, nonce)) ==> (inj-event (conductorForwardResponse(boardID,port_to_bitstring(tunnelPort), agentIDUserSide, nonce)) ==> (inj-event (wagentForwardResponse(boardID,port_to_bitstring(tunnelPort), agentIDUserSide, nonce)) ==> (inj-event (LRforwardResponse(boardID,port_to_bitstring(tunnelPort), agentIDUserSide, nonce)) ==> (inj-event (LRreceiveResponse(boardID,port_to_bitstring(tunnelPort), agentIDUserSide, nonce)) ==> inj-event (wstunResponseForTunnel(boardID, tunnelPort, agentIDUserSide, nonce)))))))"
+      }, 
+      "serviceProcess1": {
+        "query": "uID:uuid, boardID:LRid, keyServiceEncryption:key, payload:bitstring; inj-event (lightningrodReceiveRequest(uID, boardID, keyServiceEncryption, payload)) ==> (inj-event (WSTUNagentUserToLRForwardRequest(boardID)) ==> inj-event (userRequestForService(uID, boardID, keyServiceEncryption, payload)))"
+      }, 
+      "serviceProcess2": {
+        "query": "uID:uuid, boardID:LRid, keyServiceEncryption:key, result:bitstring; inj-event (userGetResult(uID, boardID, keyServiceEncryption, result)) ==> (inj-event (userReceiveResponseForService(uID, boardID, keyServiceEncryption, result)) ==> (inj-event (WSTUNagentLRToUserForwardResponse(boardID)) ==> (inj-event (lightningrodSendResponseForService(uID, boardID, keyServiceEncryption, result)) ==> inj-event (lightningrodGenerateResult(uID, boardID, keyServiceEncryption, result)))))"
+      }
+    },
+    "instantiations": {
+      "user": {
+        "username": "username", 
+        "uID": "user_id", 
+        "password": "password", 
+        "scope": "scope",
+        "boardID": "boardID", 
+        "servicePort": "servicePort", 
+        "sk1": "sk1", 
+        "sk2": "sk2", 
+        "keyTunnelUserSide": "keyTunnelUserSide", 
+        "keyServiceEncryption": "keyServiceEncryption"
+      },
+      "keystone": {
+        "ks": "ks",
+        "sk1": "sk1"
+      },
+      "iotronic_ui": {
+        "ks": "ks",
+        "sk2": "sk2", 
+        "sk3": "sk3"
+      }, 
+      "iotronic_conductor": {
+        "sk3": "sk3",
+        "sk4": "sk4"
+      }, 
+      "iotronic_wagent": {
+        "sk4": "sk4", 
+        "sk5": "sk5"
+      },
+      "iotronic_wstun": {
+        "sk6":"sk6"
+      }, 
+      "WSTUNagentUserToLR": {
+        "agentIDUserSide":"agentIDUserSide", 
+        "keyTunnelUserSide":"keyTunnelUserSide"
+      }, 
+      "WSTUNagentLRToUser": {
+        "agentIDBoardSide":"agentIDBoardSide", 
+        "keyTunnelUserSide":"keyTunnelUserSide"
+      }, 
+      "lightningrod": {
+        "sk5": "sk5", 
+        "sk6": "sk6",
+        "boardID":"boardID", 
+        "servicePort":"servicePort", 
+        "keyServiceEncryption": "keyServiceEncryption"
+      }
+    },
+    "prologue": [
+      "new ks:key;", 
+      "new sk1:key;",
+      "new sk2:key;",
+      "new sk3:key;",
+      "new sk4:key;", 
+      "new sk5:key;", 
+      "new sk6:key;", 
+      "new keyTunnelUserSide:key;",
+      "new keyServiceEncryption:key;",
+      "new servicePort:port;",
+      "new boardID:LRid;",
+      "new username:bitstring;",
+      "new password:bitstring;", 
+      "new scope:bitstring;",
+      "new agentIDBoardSide:bitstring;",
+      "new agentIDUserSide:bitstring;",
+      "insert credentials (username, password, scope);", 
+      "insert agents (agentIDBoardSide,agentIDUserSide);"
+    ]
+  }

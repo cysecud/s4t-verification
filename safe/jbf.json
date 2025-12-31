@@ -1,0 +1,356 @@
+{
+    "graph": {
+        "nodes": {  
+            "userspace": {
+                "metadata": {
+                    "type": "root", 
+                    "location": 0
+            }, 
+            "label": "userspace"
+            },      
+            "iotronic_cloud": {
+                "metadata": {
+                    "type": "root", 
+                    "location": 1
+            }, 
+            "label": "iotronic_cloud"
+            },
+            "board_side": {
+                "metadata": {
+                    "type": "root", 
+                    "location": 2
+            }, 
+            "label": "board_side"
+            },
+            "user": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "user", 
+                    "properties": {
+                        "params": ["username:bitstring", "uID:uuid", "password:bitstring", "scope:bitstring", "boardID:LRid", "servicePort:port", "sk1:key", "sk2:key", "keyTunnelUserSide:key", "keyServiceEncryption:key" ], 
+                        "behaviour": "event startOfProtocol(username); new nonceForToken:bitstring; let getTokenRequest = (username, uID, password, scope, nonceForToken) in event userRequestForToken (uID,nonceForToken); out (#0+, senc(getTokenRequest,sk1)); in (#0+, encryptedToken:bitstring); let (token:bitstring, =nonceForToken) = sdec(encryptedToken, sk1) in new serviceName:bitstring; let userInfo = (username, uID, scope) in new nonceForTunnel:bitstring; event userGetToken(uID,nonceForTunnel); let serviceEnableRequest = (userInfo, serviceName, servicePort, boardID, token, nonceForTunnel) in event userRequestForTunnel(boardID, servicePort, nonceForTunnel); out(#0+, senc(serviceEnableRequest, sk2)); in (#0+, encryptedTunnelPort:bitstring); let ((port_to_bitstring(tunnelPort)), agentIDUserSide:bitstring, =nonceForTunnel) = sdec(encryptedTunnelPort, sk2) in event userGetTunnelPort(boardID, tunnelPort, agentIDUserSide, nonceForTunnel); new payload:bitstring; let encryptedPayload = senc((uID, boardID, payload), keyServiceEncryption) in let request = (boardID, tunnelPort, senc(encryptedPayload,keyTunnelUserSide)) in event userRequestForService (uID, boardID, keyServiceEncryption, payload); out(#1+, request); in(#1+, response:bitstring); let (=boardID, =tunnelPort, data:bitstring) = response in let (=agentIDUserSide, encrypted_result:bitstring) = sdec(data, keyTunnelUserSide) in let (=boardID, =uID, result:bitstring) = sdec(encrypted_result, keyServiceEncryption) in event userReceiveResponseForService(uID, boardID, keyServiceEncryption, encrypted_result); event userGetResult(uID, boardID, keyServiceEncryption, encrypted_result); event endOfProtocol(username); 0.", 
+                        "events": ["startOfProtocol (bitstring)", "endOfProtocol (bitstring)", "userRequestForToken (uuid,bitstring)", "userGetToken (uuid,bitstring)", "userRequestForTunnel (LRid, port, bitstring)", "userGetTunnelPort (LRid, port, bitstring, bitstring)", "userRequestForService(uuid, LRid, key, bitstring)", "userReceiveResponseForService (uuid, LRid, key, bitstring)", "userGetResult (uuid, LRid, key, bitstring)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "user"
+            },
+            "keystone": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "container", 
+                    "properties": {
+                        "params": ["ks:key","sk1:key"], 
+                        "behaviour": "in (#0+, encryptedGetTokenRequest:bitstring); let getToken = sdec(encryptedGetTokenRequest, sk1) in let (username:bitstring, uID:uuid, password:bitstring, scope:bitstring, nonce:bitstring) = getToken in get credentials (=username, =password, =scope) in let token = senc((uID, scope), ks) in event keystoneCreateToken(uID,nonce); event keystoneResponseToken(uID,nonce); out(#0+, senc((token, nonce) ,sk1)); 0 else 0.",
+                        "events": ["keystoneCreateToken (uuid,bitstring)", "keystoneResponseToken (uuid,bitstring)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "keystone"
+            }, 
+            "iotronic_ui": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "container", 
+                    "properties": {
+                        "params": ["ks:key", "sk2:key", "sk3:key"], 
+                        "behaviour": "in (#0+, encryptedServiceEnableRequest:bitstring); let serviceEnableRequest = sdec(encryptedServiceEnableRequest,sk2) in let (userInfo:bitstring, serviceName:bitstring, servicePort:port,boardID:LRid, encryptedToken:bitstring, nonce:bitstring) = serviceEnableRequest in let (username:bitstring, uID:uuid, scope:bitstring) = userInfo in let token = sdec(encryptedToken, ks) in let (=uID, =scope) = token in event uiAcceptToken(uID,nonce); let portForServiceRequest = (uID, serviceName, servicePort, boardID, nonce) in event uiForwardRequest(boardID, servicePort, nonce); out (#0+, senc(portForServiceRequest, sk3)); in (#0+, encryptedTunnelPort:bitstring); let (tunnelPort:bitstring, agentID:bitstring, =nonce) = sdec(encryptedTunnelPort, sk3) in event uiForwardResponse(boardID, tunnelPort, agentID, nonce); out (#0+, senc((tunnelPort, agentID, nonce), sk2)); 0.", 
+                        "events": ["uiAcceptToken (uuid,bitstring)", "uiForwardRequest (LRid, port, bitstring)", "uiForwardResponse (LRid, bitstring, bitstring, bitstring)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "iotronic_ui"
+            }, 
+            "iotronic_conductor": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "container", 
+                    "properties": {
+                        "params": ["sk3:key", "sk4:key"], 
+                        "behaviour": "in (#0+, encryptedPortForServiceRequest:bitstring); let portForServiceRequest = sdec(encryptedPortForServiceRequest, sk3) in let (uID:uuid, serviceName:bitstring, servicePort:port, boardID:LRid, nonce:bitstring) = portForServiceRequest in let createWSTunnel = (serviceName, servicePort, boardID, nonce) in event conductorForwardRequest(boardID, servicePort, nonce); out (#0+, senc(createWSTunnel, sk4)); in (#0+, encryptedTunnelPort:bitstring); let (tunnelPort:bitstring, agentID:bitstring, =nonce) = sdec(encryptedTunnelPort, sk4) in event conductorForwardResponse(boardID, tunnelPort, agentID, nonce); out (#0+, senc((tunnelPort, agentID, nonce), sk3)); 0.", 
+                        "events": ["conductorForwardRequest (LRid, port, bitstring)", "conductorForwardResponse (LRid, bitstring, bitstring, bitstring)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "iotronic_conductor"
+            }, 
+            "iotronic_wagent": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "container", 
+                    "properties": {
+                        "params": ["sk4:key", "sk5:key"], 
+                        "behaviour": "in (#0+, encryptedCreateWSTunnel:bitstring); let createWSTunnel = sdec(encryptedCreateWSTunnel, sk4) in let (serviceName:bitstring, servicePort:port, boardID:LRid, nonce:bitstring) = createWSTunnel in event wagentForwardRequest(boardID, servicePort, nonce); out (#0+, senc(createWSTunnel, sk5)); in (#0+, encryptedTunnelPort:bitstring); let (tunnelPort:bitstring, agentID:bitstring, =nonce) = sdec(encryptedTunnelPort, sk5) in event wagentForwardResponse(boardID, tunnelPort, agentID, nonce); out (#0+, senc((tunnelPort, agentID, nonce), sk4)); 0.",
+                        "events": ["wagentForwardRequest(LRid, port, bitstring)", "wagentForwardResponse (LRid, bitstring, bitstring, bitstring)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "iotronic_wagent"
+            }, 
+            "iotronic_wstun": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "container", 
+                    "properties": {
+                        "params": ["sk6:key"], 
+                        "behaviour": "in (#0+, encryptedTunnelCreationResponse:bitstring); let tunnelCreationResponse = sdec(encryptedTunnelCreationResponse, sk6) in let (serviceName:bitstring, servicePort:port, boardID:LRid, nonce:bitstring) = tunnelCreationResponse in get agents (agentIDBoardSide, agentIDUserSide) in new tunnelPort:port; insert tunnels (tunnelPort, servicePort, boardID ); event wstunCreateTunnel(boardID, servicePort, nonce); event wstunResponseForTunnel(boardID, tunnelPort, agentIDUserSide, nonce); out (#0+, senc((port_to_bitstring(tunnelPort), agentIDUserSide, nonce), sk6)); 0 else 0.",
+                        "events": ["wstunCreateTunnel(LRid, port, bitstring)", "wstunResponseForTunnel (LRid, port, bitstring, bitstring)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "iotronic_wstun"
+            }, 
+            "WSTUNagentUserToLR": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "agent", 
+                    "properties": {
+                        "params": ["agentIDUserSide:bitstring", "keyTunnelUserSide:key"], 
+                        "behaviour": "in (#0+, requestFromUser:bitstring); let (boardID:LRid, tunnelPort:port, encryptedPayload:bitstring) = requestFromUser in let payload = sdec(encryptedPayload, keyTunnelUserSide) in get tunnels (=tunnelPort, servicePort, =boardID) in let requestToBoard = (boardID, servicePort, agentIDUserSide, payload) in event WSTUNagentUserToLRForwardRequest(boardID); out (#1+, (requestToBoard)); 0 else 0.", 
+                        "events": ["WSTUNagentUserToLRForwardRequest (LRid)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "WSTUNagentUserToLR"
+            }, 
+            "WSTUNagentLRToUser": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "agent", 
+                    "properties": {
+                        "params": ["agentIDBoardSide:bitstring", "keyTunnelUserSide:key"], 
+                        "behaviour": "in(#1+, responseFromLR:bitstring); let (boardID:LRid, servicePort:port, =agentIDBoardSide, encrypted_result:bitstring) = responseFromLR in get agents(=agentIDBoardSide,agentIDUserSide) in get tunnels (tunnelPort, =servicePort, =boardID) in let responseToUser = (boardID, tunnelPort, senc((agentIDUserSide,encrypted_result),keyTunnelUserSide)) in event WSTUNagentLRToUserForwardResponse(boardID); out (#0+, responseToUser); 0 else 0 else 0.", 
+                        "events": ["WSTUNagentLRToUserForwardResponse (LRid)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "WSTUNagentLRToUser"
+            }, 
+            "lightningrod": {
+                "metadata": {
+                    "type": "node", 
+                    "control": "board", 
+                    "properties": {
+                        "params": ["sk5:key", "sk6:key","boardID:LRid", "servicePort:port", "keyServiceEncryption:key"], 
+                        "behaviour": "in (#1+, encryptedCreateWSTunnel:bitstring); let createWSTunnel = sdec(encryptedCreateWSTunnel, sk5) in let (serviceName:bitstring, =servicePort, =boardID, nonce:bitstring) = createWSTunnel in event LRreceiveRequest(boardID, servicePort, nonce); let tunnelCreationResponse = (serviceName, servicePort, boardID, nonce) in event LRsendOK(boardID, servicePort, nonce); out (#1+, senc(tunnelCreationResponse, sk6)); in (#1+, encryptedTunnelPort:bitstring); let (tunnelPort:bitstring, agentID:bitstring, =nonce) = sdec(encryptedTunnelPort, sk6) in event LRreceiveResponse(boardID, tunnelPort, agentID, nonce); event LRforwardResponse(boardID, tunnelPort, agentID, nonce); out (#1+, senc((tunnelPort, agentID, nonce), sk5)); in (#0+, requestFromUser:bitstring); let (=boardID, =servicePort, agentIDUserSide:bitstring, encryptedPayload:bitstring) = requestFromUser in get agents (agentIDBoardSide, =agentIDUserSide) in let (uID:uuid, =boardID, payload:bitstring) = service_payload(encryptedPayload, keyServiceEncryption) in event lightningrodReceiveRequest(uID, boardID, keyServiceEncryption, payload); let encrypted_result = service_result(boardID, uID, keyServiceEncryption) in event lightningrodGenerateResult(uID, boardID, keyServiceEncryption, encrypted_result); let responseToUser = (boardID, servicePort, agentIDBoardSide, encrypted_result) in event lightningrodSendResponseForService(uID, boardID, keyServiceEncryption, encrypted_result); out (#0+, (responseToUser)); 0 else 0.",
+                        "events": ["LRreceiveResponse (LRid, bitstring, bitstring, bitstring)", "LRforwardResponse (LRid, bitstring, bitstring, bitstring)", "LRreceiveRequest (LRid, port, bitstring)", "LRsendOK (LRid, port, bitstring)", "lightningrodReceiveRequest (uuid, LRid, key, bitstring)", "lightningrodGenerateResult (uuid, LRid, key, bitstring)", "lightningrodSendResponseForService (uuid,LRid, key, bitstring)"], 
+                        "attribute": ""
+                    }
+                },
+                "label": "lightningrod"
+            }, 
+            "channelTLS": {
+                "metadata": {
+                    "type": "name", 
+                    "interface": "outer",
+                    "locality": 1,
+                    "polarity": "+"
+                },
+                "label": "channelTLS"
+            },
+            "tunnelUsersSide": {
+                "metadata": {
+                    "type": "name", 
+                    "interface": "outer",
+                    "locality": 0,
+                    "polarity": "+"
+                },
+                "label": "tunnelUsersSide"
+            },
+            "tunnelLRsSide": {
+                "metadata": {
+                    "type": "name", 
+                    "interface": "outer",
+                    "locality": 2,
+                    "polarity": "+"
+                },
+                "label": "tunnelLRsSide"
+            }
+            }, 
+            "edges": [
+            {
+                "source": "userspace", 
+                "relation": "place", 
+                "target": "user", 
+                "metadata": {}
+            }, 
+            {
+                "source": "iotronic_cloud", 
+                "relation": "place", 
+                "target": "keystone", 
+                "metadata": {}
+            }, 
+            {
+                "source": "userspace", 
+                "relation": "place", 
+                "target": "iotronic_ui", 
+                "metadata": {}
+            }, 
+            {
+                "source": "iotronic_cloud", 
+                "relation": "place", 
+                "target": "iotronic_conductor", 
+                "metadata": {}
+            }, 
+                        {
+                "source": "iotronic_cloud", 
+                "relation": "place", 
+                "target": "iotronic_wagent", 
+                "metadata": {}
+            }, 
+            {
+                "source": "iotronic_cloud", 
+                "relation": "place", 
+                "target": "iotronic_wstun", 
+                "metadata": {}
+            }, 
+            {
+                "source": "iotronic_cloud", 
+                "relation": "place", 
+                "target": "WSTUNagentUserToLR", 
+                "metadata": {}
+            },
+            {
+                "source": "iotronic_cloud", 
+                "relation": "place", 
+                "target": "WSTUNagentLRToUser", 
+                "metadata": {}
+            }, 
+            {
+                "source": "board_side",
+                "relation": "place", 
+                "target": "lightningrod", 
+                "metadata": {}
+            },
+            {
+                "source": "user", 
+                "relation": "linkedTo", 
+                "target": "channelTLS", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            }, 
+            {
+                "source": "keystone", 
+                "relation": "linkedTo", 
+                "target": "channelTLS", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            },
+            {
+                "source": "iotronic_ui", 
+                "relation": "linkedTo", 
+                "target": "channelTLS", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            },
+            {
+                "source": "iotronic_conductor", 
+                "relation": "linkedTo", 
+                "target": "channelTLS", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            },
+                        {
+                "source": "iotronic_wagent", 
+                "relation": "linkedTo", 
+                "target": "channelTLS", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            },
+            {
+                "source": "iotronic_wstun", 
+                "relation": "linkedTo", 
+                "target": "channelTLS", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            },
+            {
+                "source": "user", 
+                "relation": "linkedTo", 
+                "target": "tunnelUsersSide", 
+                "metadata": {
+                    "portFrom": "1"
+                }
+            },
+            {
+                "source": "WSTUNagentUserToLR", 
+                "relation": "linkedTo", 
+                "target": "tunnelUsersSide", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            },
+            {
+                "source": "WSTUNagentLRToUser", 
+                "relation": "linkedTo", 
+                "target": "tunnelUsersSide", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            },
+            {
+                "source": "lightningrod", 
+                "relation": "linkedTo", 
+                "target": "tunnelLRsSide", 
+                "metadata": {
+                    "portFrom": "0"
+                }
+            },
+                        {
+                "source": "lightningrod", 
+                "relation": "linkedTo", 
+                "target": "channelTLS", 
+                "metadata": {
+                    "portFrom": "1"
+                }
+            },
+            {
+                "source": "WSTUNagentUserToLR", 
+                "relation": "linkedTo", 
+                "target": "tunnelLRsSide", 
+                "metadata": {
+                    "portFrom": "1"
+                }
+            },
+            {
+                "source": "WSTUNagentLRToUser", 
+                "relation": "linkedTo", 
+                "target": "tunnelLRsSide", 
+                "metadata": {
+                    "portFrom": "1"
+                }
+            }
+        ], 
+        "type": "ldb",
+        "metadata": {
+          "signature": {
+            "container": {
+              "active": true,
+              "arityOut": 1,
+              "arityIn": 0
+            },
+            "user": {
+              "active": true,
+              "arityOut": 2,
+              "arityIn": 0
+            },
+            "agent": {
+                "active": true, 
+                "arityOut": 2,
+                "arityIn": 0
+            },
+            "board": {
+                "active": true, 
+                "arityOut": 2,
+                "arityIn": 0
+            }
+          }
+        }
+      }
+    }
