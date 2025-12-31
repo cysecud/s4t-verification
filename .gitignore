@@ -1,0 +1,15 @@
+*.aux
+*.bbl
+*.blg
+*.hd
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.abs
+*.xmpi
+*.xmpdata
+
+*.bkp
+
+.DS_Store
